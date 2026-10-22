@@ -36,7 +36,7 @@ jobs:
       VIDEO_STYLE: ${{ inputs.style }}
       VIDEO_LANGUAGE: ${{ inputs.language }}
       OUTPUT_DIR: artifacts/${{ github.run_id }}
-      GEMINI_TEXT_MODEL: gemini-2.0-flash
+      GEMINI_TEXT_MODEL: gemini-3.8-flash
       GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
     steps:
       - name: Check out source
