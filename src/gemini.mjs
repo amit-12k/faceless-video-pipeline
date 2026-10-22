@@ -1,5 +1,5 @@
 import { postJson } from "./http.mjs";
-import { researchSchema, scriptSchema } from "./schemas.mjs";
+import { ELEMENT_KINDS, researchSchema, scriptSchema } from "./schemas.mjs";
 import { searchWeb } from "./tavily.mjs";
 
 const API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
@@ -75,7 +75,7 @@ export async function writeScript(topic, style, language, research) {
     "Narration language: " + language,
     "Create 5 to 8 scenes. Give each a short title, 1 to 3 narration sentences, claim_ids, and an animated graphic described by layout, elements, points, stat_value, and stat_label.",
     "Layouts: flow = 2 to 4 elements in the order data or requests move (for example user, API, database); compare = exactly 2 elements being contrasted, with up to 4 points where the first half describe the first element; stat = one number from the narration in stat_value (for example \"99.99%\" or \"3x\") with a short stat_label; list = up to 4 points; focus = one main element plus up to 3 related elements. Vary layouts across scenes.",
-    "elements are the concrete tools, services, or concepts the narration talks about. name is the real product name when one is meant (for example \"Redis\", \"PostgreSQL\", \"Docker\", \"Amazon S3\") with is_product true; otherwise a short generic label (for example \"Users\", \"Load balancer\") with is_product false. kind is the closest generic category.",
+    "elements are the concrete tools, services, or concepts the narration talks about. name is the real product name when one is meant (for example \"Redis\", \"PostgreSQL\", \"Docker\", \"Amazon S3\") with is_product true; otherwise a short generic label (for example \"Users\", \"Load balancer\") with is_product false. kind is the closest generic category, one of: " + ELEMENT_KINDS.join(", ") + ". Use at most 4 elements and 4 points per scene.",
     "points are 2 to 6 word phrases. Use empty strings for stat_value and stat_label unless layout is stat. Graphics must not add facts beyond the narration.",
     "Every material factual statement must be covered by one or more claim_ids.",
     "Do not add facts, statistics, dates, or causal claims absent from the research. Avoid quoting source wording.",
