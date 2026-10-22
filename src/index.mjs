@@ -1,6 +1,8 @@
 import { mkdir, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { createNarrationAudio, researchTopic, writeScript } from "./gemini.mjs";
+import { findSceneMedia } from "./media.mjs";
 import { checkVideo, renderVideo } from "./render.mjs";
 import { validateProject } from "./validate.mjs";
 
@@ -48,8 +50,14 @@ async function main() {
     const voice = await createNarrationAudio(narration, language);
     const audioPath = path.join(outputDir, "narration.wav");
     await writeFile(audioPath, voice.audio);
-    log("render", "Rendering vertical motion-graphics scenes and subtitles.");
-    const rendered = await renderVideo(scriptResult.data, audioPath, outputDir);
+    log("visuals", "Finding stock footage for each scene.");
+    // Source media stays outside the artifact directory so it is not uploaded.
+    const media = await findSceneMedia(scriptResult.data.scenes, path.join(os.tmpdir(), "scene-media-" + jobId), log);
+    await saveJson(path.join(outputDir, "media-credits.json"), media.map((item, index) => item
+      ? { scene: index + 1, type: item.type, query: item.query, source: item.source, author: item.author }
+      : { scene: index + 1, type: "text-card" }));
+    log("render", "Rendering vertical scenes and subtitles.");
+    const rendered = await renderVideo(scriptResult.data, audioPath, outputDir, media);
     const quality = await checkVideo(rendered.videoPath);
     await saveJson(path.join(outputDir, "quality-report.json"), quality);
     log("complete", "Video passed stream, dimensions, duration, and file-size checks.");

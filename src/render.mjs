@@ -44,14 +44,55 @@ async function probe(file) {
   return JSON.parse(result.stdout);
 }
 
-export async function renderVideo(script, audioPath, outputDir) {
+const FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+const FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+const countWords = (text) => text.trim().split(/\s+/).filter(Boolean).length;
+
+function sceneInput(media, duration) {
+  const seconds = duration.toFixed(3);
+  if (media?.type === "video") return ["-stream_loop", "-1", "-t", seconds, "-i", media.path];
+  if (media?.type === "image") return ["-loop", "1", "-framerate", "30", "-t", seconds, "-i", media.path];
+  return ["-f", "lavfi", "-i", "color=c=0x0B1020:s=1080x1920:r=30:d=" + seconds];
+}
+
+// Fill the 9:16 frame: crop footage to the centre, and give photos a slow zoom so they do not sit still.
+function backgroundFilters(media, duration) {
+  if (media?.type === "video") {
+    return ["scale=1080:1920:force_original_aspect_ratio=increase", "crop=1080:1920", "setsar=1", "fps=30",
+      "drawbox=x=0:y=0:w=1080:h=1920:color=black@0.2:t=fill"];
+  }
+  if (media?.type === "image") {
+    const frames = Math.max(1, Math.round(duration * 30));
+    return ["scale=2160:3840:force_original_aspect_ratio=increase", "crop=2160:3840", "setsar=1",
+      "zoompan=z='1+0.08*on/" + frames + "':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps=30",
+      "drawbox=x=0:y=0:w=1080:h=1920:color=black@0.2:t=fill"];
+  }
+  return [];
+}
+
+// Splits narration into short caption chunks, breaking after sentence ends or every few words.
+function captionChunks(text, maxWords) {
+  const chunks = [];
+  let current = [];
+  for (const word of text.replace(/\s+/g, " ").trim().split(" ")) {
+    current.push(word);
+    if (current.length >= maxWords || (/[.!?]$/.test(word) && current.length >= 3)) {
+      chunks.push(current.join(" "));
+      current = [];
+    }
+  }
+  if (current.length) chunks.push(current.join(" "));
+  return chunks;
+}
+
+export async function renderVideo(script, audioPath, outputDir, media = []) {
   const audioDuration = Number((await probe(audioPath)).format?.duration || 0);
   if (!audioDuration || audioDuration > 180) throw new Error("Narration audio is missing or exceeds 180 seconds.");
   const scenes = script.scenes;
   const sceneDir = path.join(outputDir, "scene-assets");
   await mkdir(sceneDir, { recursive: true });
-  const counts = scenes.map((scene, index) =>
-    Math.max(1, scene.narration.trim().split(/\s+/).length + (index === 0 ? script.hook.trim().split(/\s+/).length : 0)));
+  const spoken = scenes.map((scene, index) => (index === 0 ? script.hook + " " : "") + scene.narration);
+  const counts = spoken.map((text) => Math.max(1, countWords(text)));
   const total = counts.reduce((a, b) => a + b, 0);
   const durations = counts.map((count) => audioDuration * count / total);
   const palette = ["68D7C4", "F4B942", "8B9CFF", "FF7D8A", "A8D36A", "55B6E8", "D49BFF", "FF9866"];
@@ -67,27 +108,45 @@ export async function renderVideo(script, audioPath, outputDir) {
     const clip = path.join(sceneDir, stem + ".mp4");
     const accent = palette[i % palette.length];
     const duration = durations[i];
-    await writeFile(titleFile, wrap(scene.title, 22), "utf8");
-    await writeFile(bodyFile, wrap(scene.visual_text, 25).split("\n").slice(0, 5).join("\n"), "utf8");
+    const title = wrap(scene.title, 24).split("\n").slice(0, 2).join("\n");
+    const bodyY = 200 + title.split("\n").length * 86 + 24;
+    await writeFile(titleFile, title, "utf8");
+    await writeFile(bodyFile, wrap(scene.visual_text, 30).split("\n").slice(0, 2).join("\n"), "utf8");
+    const cardFile = path.join(sceneDir, stem + "-card.txt");
+    await writeFile(cardFile, wrap(scene.visual_text, 18).split("\n").slice(0, 4).join("\n"), "utf8");
+    // Without stock media, the visual text becomes the centre of a plain card.
+    const card = media[i] ? [] : ["drawtext=fontfile=" + FONT_BOLD + ":textfile=" + cardFile + ":fontcolor=white:fontsize=88"
+      + ":x=(w-text_w)/2:y=(h-text_h)/2:line_spacing=24"];
     const filters = [
-      "drawbox=x=0:y=0:w=1080:h=1920:color=0x0B1020:t=fill",
-      "drawbox=x=72:y=170:w=936:h=12:color=0x" + accent + ":t=fill",
-      "drawbox=x=72:y=240:w=936:h=2:color=0x" + accent + "@0.35:t=fill",
-      "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:textfile=" + titleFile + ":fontcolor=white:fontsize=62:x=84:y=340:line_spacing=20",
-      "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=" + bodyFile + ":fontcolor=0xE5ECFF:fontsize=44:x=84:y=700:line_spacing=26",
-      "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text=0" + String(i + 1).padStart(2, "0") + ":fontcolor=0x" + accent + ":fontsize=34:x=84:y=110",
+      ...backgroundFilters(media[i], duration),
+      ...card,
+      // Dark bands keep the title and subtitles readable over bright footage.
+      "drawbox=x=0:y=0:w=1080:h=" + (bodyY + 150) + ":color=black@0.5:t=fill",
+      "drawbox=x=0:y=1400:w=1080:h=520:color=black@0.45:t=fill",
+      "drawbox=x=72:y=150:w=936:h=10:color=0x" + accent + ":t=fill",
+      "drawtext=fontfile=" + FONT_BOLD + ":text=" + String(i + 1).padStart(2, "0") + ":fontcolor=0x" + accent + ":fontsize=34:x=72:y=96",
+      "drawtext=fontfile=" + FONT_BOLD + ":textfile=" + titleFile + ":fontcolor=white:fontsize=68:x=72:y=200:line_spacing=18",
+      "drawtext=fontfile=" + FONT + ":textfile=" + bodyFile + ":fontcolor=0x" + accent + ":fontsize=44:x=72:y=" + bodyY + ":line_spacing=14",
       "fade=t=in:st=0:d=0.3",
-      "fade=t=out:st=" + Math.max(0.1, duration - 0.3).toFixed(3) + ":d=0.3"
+      "fade=t=out:st=" + Math.max(0.1, duration - 0.3).toFixed(3) + ":d=0.3",
+      "format=yuv420p"
     ].join(",");
     await run("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-y",
-      "-f", "lavfi", "-i", "color=c=0x0B1020:s=1080x1920:r=30:d=" + duration.toFixed(3),
-      "-vf", filters, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+      "-hide_banner", "-loglevel", "error", "-y", ...sceneInput(media[i], duration),
+      "-vf", filters, "-an", "-t", duration.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
       "-pix_fmt", "yuv420p", "-r", "30", clip
     ]);
     clips.push("file '" + clip.replaceAll("'", "'\\''") + "'");
-    const caption = (i === 0 ? script.hook + " " : "") + scene.narration;
-    captions.push(String(i + 1), timecode(elapsed) + " --> " + timecode(elapsed + duration), wrap(caption, 40), "");
+
+    // Time each caption chunk by its share of the scene's characters.
+    const chunks = captionChunks(spoken[i], 6);
+    const chars = chunks.reduce((sum, chunk) => sum + chunk.length + 1, 0);
+    let start = elapsed;
+    for (const chunk of chunks) {
+      const end = start + duration * (chunk.length + 1) / chars;
+      captions.push(String(captions.length / 4 + 1), timecode(start) + " --> " + timecode(end), wrap(chunk, 24), "");
+      start = end;
+    }
     elapsed += duration;
   }
 
@@ -100,8 +159,12 @@ export async function renderVideo(script, audioPath, outputDir) {
   await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
     "-i", concatFile, "-an", "-c", "copy", silentVideo]);
 
+  // libass renders SRT on a 384x288 canvas and scales it to the frame (about 6.7x for 1920 px high),
+  // so FontSize=10 is roughly 67 px and MarginV=45 places captions about 300 px above the bottom.
   const subtitlePath = subtitleFile.replaceAll("\\", "/").replaceAll(":", "\\:");
-  const vf = "subtitles=filename=" + subtitlePath + ":force_style='FontName=DejaVu Sans,FontSize=18,Outline=2,Shadow=1,MarginV=150',format=yuv420p";
+  const style = "FontName=DejaVu Sans,Bold=1,FontSize=10,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+    + "BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=45,MarginL=10,MarginR=10";
+  const vf = "subtitles=filename=" + subtitlePath + ":force_style='" + style + "',format=yuv420p";
   await run("ffmpeg", [
     "-hide_banner", "-loglevel", "error", "-y", "-i", silentVideo, "-i", audioPath,
     "-vf", vf, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "veryfast",

@@ -39,10 +39,11 @@ export const scriptSchema = {
         properties: {
           title: { type: "string" },
           visual_text: { type: "string" },
+          visual_query: { type: "string" },
           narration: { type: "string" },
           claim_ids: { type: "array", items: { type: "string" } }
         },
-        required: ["title", "visual_text", "narration", "claim_ids"]
+        required: ["title", "visual_text", "visual_query", "narration", "claim_ids"]
       }
     }
   },

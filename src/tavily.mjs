@@ -20,7 +20,8 @@ export async function searchWeb(query) {
     search_depth: "basic",
     max_results: 8,
     include_answer: false,
-    include_raw_content: false
+    include_raw_content: false,
+    exclude_domains: ["youtube.com", "tiktok.com", "instagram.com", "facebook.com"]
   }, "Web search");
   const found = new Map();
   for (const result of response.results || []) {

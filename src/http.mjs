@@ -9,17 +9,24 @@ function retryDelay(response, attempt) {
   return response.status === 429 ? attempt * 15000 : attempt * 2000;
 }
 
-export async function postJson(url, headers, payload, stage) {
+export function postJson(url, headers, payload, stage) {
+  return requestJson(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(payload)
+  }, stage);
+}
+
+export function getJson(url, stage) {
+  return requestJson(url, { method: "GET" }, stage);
+}
+
+async function requestJson(url, init, stage) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     let delay = attempt * 2000;
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(120000)
-      });
+      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(120000) });
       if (!response.ok) {
         const detail = (await response.text()).slice(0, 400);
         const error = new Error(stage + " API returned HTTP " + response.status + ": " + detail);
