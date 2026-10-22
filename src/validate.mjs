@@ -27,8 +27,8 @@ export function validateProject(research, script, searched) {
   if (scenes.length < 5 || scenes.length > 8) errors.push("Script must contain 5 to 8 scenes.");
   const used = new Set();
   for (const [index, scene] of scenes.entries()) {
-    if (!scene.title?.trim() || !scene.visual_text?.trim() || !scene.narration?.trim()) {
-      errors.push("Scene " + (index + 1) + " is missing title, visual text, or narration.");
+    if (!scene.title?.trim() || !scene.narration?.trim()) {
+      errors.push("Scene " + (index + 1) + " is missing a title or narration.");
     }
     if (!Array.isArray(scene.claim_ids) || !scene.claim_ids.length) errors.push("Scene " + (index + 1) + " has no claim references.");
     for (const id of scene.claim_ids || []) {

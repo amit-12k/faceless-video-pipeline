@@ -27,6 +27,17 @@ export const researchSchema = {
   required: ["topic", "summary", "claims"]
 };
 
+// Generic element categories; each maps to an icon in remotion/icons.js.
+export const ELEMENT_KINDS = [
+  "user", "users", "browser", "mobile", "server", "database", "cache", "storage", "file", "api", "queue",
+  "load-balancer", "cdn", "cloud", "network", "lock", "key", "security", "token", "code", "terminal", "function",
+  "container", "settings", "time", "metrics", "bug", "email", "notification", "compute", "search", "success",
+  "warning", "deploy", "cost", "package", "layers", "performance", "sync", "workflow", "webhook", "archive",
+  "identity", "monitoring", "message", "scale"
+];
+
+export const SCENE_LAYOUTS = ["flow", "compare", "stat", "list", "focus"];
+
 export const scriptSchema = {
   type: "object",
   properties: {
@@ -38,12 +49,26 @@ export const scriptSchema = {
         type: "object",
         properties: {
           title: { type: "string" },
-          visual_text: { type: "string" },
-          visual_query: { type: "string" },
           narration: { type: "string" },
-          claim_ids: { type: "array", items: { type: "string" } }
+          claim_ids: { type: "array", items: { type: "string" } },
+          layout: { type: "string", enum: SCENE_LAYOUTS },
+          elements: {
+            type: "array", maxItems: 4,
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                kind: { type: "string", enum: ELEMENT_KINDS },
+                is_product: { type: "boolean" }
+              },
+              required: ["name", "kind", "is_product"]
+            }
+          },
+          points: { type: "array", maxItems: 4, items: { type: "string" } },
+          stat_value: { type: "string" },
+          stat_label: { type: "string" }
         },
-        required: ["title", "visual_text", "visual_query", "narration", "claim_ids"]
+        required: ["title", "narration", "claim_ids", "layout", "elements", "points", "stat_value", "stat_label"]
       }
     }
   },

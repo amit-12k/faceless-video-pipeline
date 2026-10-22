@@ -17,10 +17,6 @@ export function postJson(url, headers, payload, stage) {
   }, stage);
 }
 
-export function getJson(url, stage) {
-  return requestJson(url, { method: "GET" }, stage);
-}
-
 async function requestJson(url, init, stage) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {

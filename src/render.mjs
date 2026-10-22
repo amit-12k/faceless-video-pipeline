@@ -1,16 +1,25 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { bundle } from "@remotion/bundler";
+import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";
+import * as simpleIcons from "simple-icons";
+
+const FPS = 30;
+const ROOT_DIR = fileURLToPath(new URL("..", import.meta.url));
+const ENTRY_POINT = path.join(ROOT_DIR, "remotion", "index.jsx");
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
+    const stdout = [];
     let stderr = "";
-    child.stdout.on("data", (part) => { stdout += part; });
+    child.stdout.on("data", (part) => { stdout.push(part); });
     child.stderr.on("data", (part) => { stderr += part; });
     child.on("error", reject);
-    child.on("close", (code) => code === 0 ? resolve({ stdout, stderr }) :
+    child.on("close", (code) => code === 0 ? resolve({ stdout: Buffer.concat(stdout), stderr }) :
       reject(new Error(command + " exited " + code + ": " + stderr.slice(-2500))));
   });
 }
@@ -41,136 +50,170 @@ async function probe(file) {
     "-v", "error", "-show_entries", "format=duration,size:stream=codec_type,width,height",
     "-of", "json", file
   ]);
-  return JSON.parse(result.stdout);
+  return JSON.parse(result.stdout.toString());
 }
 
-const FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-const FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-const countWords = (text) => text.trim().split(/\s+/).filter(Boolean).length;
+const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * p)] || 0;
 
-function sceneInput(media, duration) {
-  const seconds = duration.toFixed(3);
-  if (media?.type === "video") return ["-stream_loop", "-1", "-t", seconds, "-i", media.path];
-  if (media?.type === "image") return ["-loop", "1", "-framerate", "30", "-t", seconds, "-i", media.path];
-  return ["-f", "lavfi", "-i", "color=c=0x0B1020:s=1080x1920:r=30:d=" + seconds];
-}
-
-// Fill the 9:16 frame: crop footage to the centre, and give photos a slow zoom so they do not sit still.
-function backgroundFilters(media, duration) {
-  if (media?.type === "video") {
-    return ["scale=1080:1920:force_original_aspect_ratio=increase", "crop=1080:1920", "setsar=1", "fps=30",
-      "drawbox=x=0:y=0:w=1080:h=1920:color=black@0.2:t=fill"];
+// Loudness (RMS) of the narration for every video frame.
+async function frameLoudness(audioPath, frames) {
+  const rate = 16000;
+  const { stdout } = await run("ffmpeg", ["-v", "error", "-i", audioPath, "-ac", "1", "-ar", String(rate), "-f", "s16le", "-"]);
+  const perFrame = rate / FPS;
+  const sums = new Float64Array(frames);
+  const counts = new Uint32Array(frames);
+  for (let i = 0; i + 1 < stdout.length; i += 2) {
+    const frame = Math.min(frames - 1, Math.floor(i / 2 / perFrame));
+    const sample = stdout.readInt16LE(i) / 32768;
+    sums[frame] += sample * sample;
+    counts[frame] += 1;
   }
-  if (media?.type === "image") {
-    const frames = Math.max(1, Math.round(duration * 30));
-    return ["scale=2160:3840:force_original_aspect_ratio=increase", "crop=2160:3840", "setsar=1",
-      "zoompan=z='1+0.08*on/" + frames + "':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps=30",
-      "drawbox=x=0:y=0:w=1080:h=1920:color=black@0.2:t=fill"];
-  }
-  return [];
+  return Array.from(sums, (sum, i) => Math.sqrt(sum / Math.max(1, counts[i])));
 }
 
-// Splits narration into short caption chunks, breaking after sentence ends or every few words.
-function captionChunks(text, maxWords) {
-  const chunks = [];
-  let current = [];
-  for (const word of text.replace(/\s+/g, " ").trim().split(" ")) {
-    current.push(word);
-    if (current.length >= maxWords || (/[.!?]$/.test(word) && current.length >= 3)) {
-      chunks.push(current.join(" "));
-      current = [];
+// Moves estimated scene cuts onto the nearest pause in the narration so slides change between sentences.
+function sceneBoundaries(weights, speaking, frames) {
+  const pauses = [];
+  for (let f = 0, start = -1; f <= frames; f += 1) {
+    const silent = f < frames && !speaking[f];
+    if (silent && start < 0) start = f;
+    if (!silent && start >= 0) {
+      if (f - start >= 8) pauses.push(Math.round((start + f) / 2));
+      start = -1;
     }
   }
-  if (current.length) chunks.push(current.join(" "));
-  return chunks;
+  const total = weights.reduce((a, b) => a + b, 0);
+  const cuts = [0];
+  let cumulative = 0;
+  for (const weight of weights.slice(0, -1)) {
+    cumulative += weight;
+    const estimate = Math.round(frames * cumulative / total);
+    const nearest = pauses.reduce((best, p) => Math.abs(p - estimate) < Math.abs(best - estimate) ? p : best, Infinity);
+    const cut = Math.abs(nearest - estimate) <= 36 ? nearest : estimate;
+    cuts.push(Math.max(cut, cuts[cuts.length - 1] + FPS));
+  }
+  cuts.push(frames);
+  return cuts.map((start, i) => [start, cuts[i + 1]]).slice(0, weights.length);
 }
 
-export async function renderVideo(script, audioPath, outputDir, media = []) {
+// Spreads each scene's words over the frames where the narrator is actually speaking.
+function timeWords(text, start, end, speaking) {
+  const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  let voiced = [];
+  for (let f = start; f < end; f += 1) if (speaking[f]) voiced.push(f);
+  if (voiced.length < words.length) voiced = Array.from({ length: end - start }, (_, i) => start + i);
+  const weights = words.map((word) => word.length + 1 + (/[.!?,;:]$/.test(word) ? 3 : 0));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let cumulative = 0;
+  const starts = weights.map((weight) => {
+    const frame = voiced[Math.min(voiced.length - 1, Math.floor(voiced.length * cumulative / total))];
+    cumulative += weight;
+    return frame;
+  });
+  return words.map((word, i) => ({ text: word, start: starts[i], end: i + 1 < words.length ? starts[i + 1] : end }));
+}
+
+const normalizeName = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+const BRAND_ALIASES = {
+  postgres: "postgresql", k8s: "kubernetes", golang: "go", kafka: "apachekafka", cassandra: "apachecassandra",
+  spark: "apachespark", mongo: "mongodb", elastic: "elasticsearch", gcp: "googlecloud", jwt: "jsonwebtokens",
+  node: "nodedotjs", nextjs: "nextdotjs", gemini: "googlegemini"
+};
+const brandIndex = new Map();
+for (const icon of Object.values(simpleIcons)) {
+  if (!icon?.slug || !icon.path) continue;
+  brandIndex.set(icon.slug, icon);
+  if (!brandIndex.has(normalizeName(icon.title))) brandIndex.set(normalizeName(icon.title), icon);
+}
+
+// Dark brand colours (black logos) would vanish on the dark background, so they are drawn white.
+function brandColor(hex) {
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.28 ? "#FFFFFF" : "#" + hex;
+}
+
+function resolveElement(element) {
+  const name = String(element.name || "").trim().slice(0, 40) || "Concept";
+  const key = normalizeName(name);
+  const icon = element.is_product ? brandIndex.get(BRAND_ALIASES[key] || key) : null;
+  return { name, kind: element.kind, brand: icon ? { path: icon.path, color: brandColor(icon.hex) } : null };
+}
+
+// Makes each scene's graphic match what its layout needs, falling back to simpler layouts when it does not.
+function prepareScene(scene) {
+  const elements = (scene.elements || []).slice(0, 4).map(resolveElement);
+  const points = (scene.points || []).map((point) => String(point).trim()).filter(Boolean).slice(0, 4);
+  const digits = (scene.stat_value || "").replace(/[^0-9]/g, "");
+  let layout = scene.layout;
+  if (layout === "stat" && (!digits || !scene.narration.replace(/[^0-9]/g, "").includes(digits))) layout = "focus";
+  if (layout === "flow" && elements.length < 2) layout = "focus";
+  if (layout === "compare" && elements.length < 2) layout = points.length ? "list" : "focus";
+  if (layout === "list" && !points.length) layout = "focus";
+  if (layout === "focus" && !elements.length) elements.push({ name: scene.title, kind: "layers", brand: null });
+  return { layout, elements, points, stat_value: scene.stat_value || "", stat_label: scene.stat_label || "" };
+}
+
+function writeSubtitles(words) {
+  const cues = [];
+  for (let i = 0; i < words.length; i += 6) {
+    const group = words.slice(i, i + 6);
+    cues.push(String(cues.length + 1), timecode(group[0].start / FPS) + " --> " + timecode(group[group.length - 1].end / FPS),
+      wrap(group.map((word) => word.text).join(" "), 32), "");
+  }
+  return cues.join("\n");
+}
+
+export async function renderVideo(script, audioPath, outputDir, log = () => {}) {
   const audioDuration = Number((await probe(audioPath)).format?.duration || 0);
   if (!audioDuration || audioDuration > 180) throw new Error("Narration audio is missing or exceeds 180 seconds.");
-  const scenes = script.scenes;
-  const sceneDir = path.join(outputDir, "scene-assets");
-  await mkdir(sceneDir, { recursive: true });
-  const spoken = scenes.map((scene, index) => (index === 0 ? script.hook + " " : "") + scene.narration);
-  const counts = spoken.map((text) => Math.max(1, countWords(text)));
-  const total = counts.reduce((a, b) => a + b, 0);
-  const durations = counts.map((count) => audioDuration * count / total);
-  const palette = ["68D7C4", "F4B942", "8B9CFF", "FF7D8A", "A8D36A", "55B6E8", "D49BFF", "FF9866"];
-  const clips = [];
-  const captions = [];
-  let elapsed = 0;
+  const frames = Math.ceil(audioDuration * FPS);
+  const loudness = await frameLoudness(audioPath, frames);
+  const peak = percentile(loudness, 0.95) || 1;
+  const speaking = loudness.map((value) => value > peak * 0.12);
 
-  for (let i = 0; i < scenes.length; i += 1) {
-    const scene = scenes[i];
-    const stem = "scene-" + String(i + 1).padStart(2, "0");
-    const titleFile = path.join(sceneDir, stem + "-title.txt");
-    const bodyFile = path.join(sceneDir, stem + "-body.txt");
-    const clip = path.join(sceneDir, stem + ".mp4");
-    const accent = palette[i % palette.length];
-    const duration = durations[i];
-    const title = wrap(scene.title, 24).split("\n").slice(0, 2).join("\n");
-    const bodyY = 200 + title.split("\n").length * 86 + 24;
-    await writeFile(titleFile, title, "utf8");
-    await writeFile(bodyFile, wrap(scene.visual_text, 30).split("\n").slice(0, 2).join("\n"), "utf8");
-    const cardFile = path.join(sceneDir, stem + "-card.txt");
-    await writeFile(cardFile, wrap(scene.visual_text, 18).split("\n").slice(0, 4).join("\n"), "utf8");
-    // Without stock media, the visual text becomes the centre of a plain card.
-    const card = media[i] ? [] : ["drawtext=fontfile=" + FONT_BOLD + ":textfile=" + cardFile + ":fontcolor=white:fontsize=88"
-      + ":x=(w-text_w)/2:y=(h-text_h)/2:line_spacing=24"];
-    const filters = [
-      ...backgroundFilters(media[i], duration),
-      ...card,
-      // Dark bands keep the title and subtitles readable over bright footage.
-      "drawbox=x=0:y=0:w=1080:h=" + (bodyY + 150) + ":color=black@0.5:t=fill",
-      "drawbox=x=0:y=1400:w=1080:h=520:color=black@0.45:t=fill",
-      "drawbox=x=72:y=150:w=936:h=10:color=0x" + accent + ":t=fill",
-      "drawtext=fontfile=" + FONT_BOLD + ":text=" + String(i + 1).padStart(2, "0") + ":fontcolor=0x" + accent + ":fontsize=34:x=72:y=96",
-      "drawtext=fontfile=" + FONT_BOLD + ":textfile=" + titleFile + ":fontcolor=white:fontsize=68:x=72:y=200:line_spacing=18",
-      "drawtext=fontfile=" + FONT + ":textfile=" + bodyFile + ":fontcolor=0x" + accent + ":fontsize=44:x=72:y=" + bodyY + ":line_spacing=14",
-      "fade=t=in:st=0:d=0.3",
-      "fade=t=out:st=" + Math.max(0.1, duration - 0.3).toFixed(3) + ":d=0.3",
-      "format=yuv420p"
-    ].join(",");
-    await run("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-y", ...sceneInput(media[i], duration),
-      "-vf", filters, "-an", "-t", duration.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-      "-pix_fmt", "yuv420p", "-r", "30", clip
-    ]);
-    clips.push("file '" + clip.replaceAll("'", "'\\''") + "'");
+  const spoken = script.scenes.map((scene, i) => (i === 0 ? script.hook + " " : "") + scene.narration);
+  const bounds = sceneBoundaries(spoken.map((text) => text.length), speaking, frames);
+  const words = bounds.flatMap(([start, end], i) => timeWords(spoken[i], start, end, speaking));
+  const scenes = script.scenes.map((scene, i) => ({ start: bounds[i][0], end: bounds[i][1], ...prepareScene(scene) }));
 
-    // Time each caption chunk by its share of the scene's characters.
-    const chunks = captionChunks(spoken[i], 6);
-    const chars = chunks.reduce((sum, chunk) => sum + chunk.length + 1, 0);
-    let start = elapsed;
-    for (const chunk of chunks) {
-      const end = start + duration * (chunk.length + 1) / chars;
-      captions.push(String(captions.length / 4 + 1), timecode(start) + " --> " + timecode(end), wrap(chunk, 24), "");
-      start = end;
-    }
-    elapsed += duration;
+  // Mouth openness per frame: loudness normalised to 0..1 and smoothed so it does not flicker.
+  const mouth = [];
+  for (const value of loudness) {
+    const level = Math.min(1, value / peak) ** 0.8;
+    const previous = mouth.length ? mouth[mouth.length - 1] : 0;
+    mouth.push(Math.round((level > previous ? level * 0.7 + previous * 0.3 : level * 0.4 + previous * 0.6) * 100) / 100);
   }
 
-  const concatFile = path.join(sceneDir, "concat.txt");
-  const silentVideo = path.join(sceneDir, "silent.mp4");
   const subtitleFile = path.join(outputDir, "subtitles.srt");
   const finalVideo = path.join(outputDir, "video.mp4");
-  await writeFile(concatFile, clips.join("\n") + "\n", "utf8");
-  await writeFile(subtitleFile, captions.join("\n"), "utf8");
-  await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
-    "-i", concatFile, "-an", "-c", "copy", silentVideo]);
+  await writeFile(subtitleFile, writeSubtitles(words), "utf8");
 
-  // libass renders SRT on a 384x288 canvas and scales it to the frame (about 6.7x for 1920 px high),
-  // so FontSize=10 is roughly 67 px and MarginV=45 places captions about 300 px above the bottom.
-  const subtitlePath = subtitleFile.replaceAll("\\", "/").replaceAll(":", "\\:");
-  const style = "FontName=DejaVu Sans,Bold=1,FontSize=10,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-    + "BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=45,MarginL=10,MarginR=10";
-  const vf = "subtitles=filename=" + subtitlePath + ":force_style='" + style + "',format=yuv420p";
-  await run("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-y", "-i", silentVideo, "-i", audioPath,
-    "-vf", vf, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "veryfast",
-    "-crf", "23", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", finalVideo
-  ]);
+  const publicDir = await mkdtemp(path.join(os.tmpdir(), "remotion-public-"));
+  await copyFile(audioPath, path.join(publicDir, "narration.wav"));
+  const inputProps = { scenes, words, mouth, audio: "narration.wav", durationInFrames: frames };
+  await saveScenes(outputDir, scenes);
+
+  await ensureBrowser();
+  const serveUrl = await bundle({ entryPoint: ENTRY_POINT, rootDir: ROOT_DIR, publicDir });
+  const composition = await selectComposition({ serveUrl, id: "Explainer", inputProps });
+  let lastLogged = -1;
+  await renderMedia({
+    composition, serveUrl, codec: "h264", crf: 20, outputLocation: finalVideo, inputProps,
+    onProgress: ({ progress }) => {
+      const step = Math.floor(progress * 10);
+      if (step > lastLogged) { lastLogged = step; log("render", "Rendered " + step * 10 + "%."); }
+    }
+  });
   return { videoPath: finalVideo, subtitlesPath: subtitleFile };
+}
+
+async function saveScenes(outputDir, scenes) {
+  const summary = scenes.map(({ start, end, layout, elements, points, stat_value, stat_label }, i) => ({
+    scene: i + 1, start_seconds: start / FPS, end_seconds: end / FPS, layout,
+    elements: elements.map((element) => ({ name: element.name, kind: element.kind, logo: Boolean(element.brand) })),
+    points, stat_value, stat_label
+  }));
+  await writeFile(path.join(outputDir, "scene-plan.json"), JSON.stringify(summary, null, 2) + "\n", "utf8");
 }
 
 export async function checkVideo(file) {
