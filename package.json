@@ -1,0 +1,1 @@
+{"name":"faceless-video-pipeline","version":"0.1.0","private":true,"type":"module","scripts":{"check":"node --check src/index.mjs && node --check src/gemini.mjs && node --check src/render.mjs && node --check src/schemas.mjs && node --check src/validate.mjs"},"engines":{"node":">=22"}}
