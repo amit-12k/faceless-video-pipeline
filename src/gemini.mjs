@@ -64,7 +64,7 @@ export async function researchTopic(topic, style, language) {
   return { data: JSON.parse(getText(response)), searchSources: sources.map(({ url, title }) => ({ url, title })), model };
 }
 
-export async function writeScript(topic, style, language, research) {
+export async function writeScript(topic, style, language, research, feedback = []) {
   const model = process.env.GEMINI_TEXT_MODEL || "gemini-3.5-flash-lite";
   const facts = research.claims.filter((claim) => claim.support === "supported");
   if (facts.length < 3) throw new Error("Research found fewer than three source-supported claims.");
@@ -73,15 +73,20 @@ export async function writeScript(topic, style, language, research) {
     "Topic: " + topic,
     "Style: " + style,
     "Narration language: " + language,
-    "Create 5 to 8 scenes. Give each a short title, 1 to 3 narration sentences, claim_ids, and an animated graphic described by layout, elements, points, stat_value, and stat_label.",
-    "Layouts: flow = 2 to 4 elements in the order data or requests move (for example user, API, database); compare = exactly 2 elements being contrasted, with up to 4 points where the first half describe the first element; stat = one number from the narration in stat_value (for example \"99.99%\" or \"3x\") with a short stat_label; list = up to 4 points; focus = one main element plus up to 3 related elements. Vary layouts across scenes.",
+    "Structure: the hook (one sentence, under 16 words) poses the question or stakes a viewer cares about; the scenes then explain what it is, how it works step by step, a concrete example or demonstration, and end with a short takeaway scene. Adapt this arc to the topic rather than forcing it.",
+    "Write natural spoken language for listening, not reading: short sentences, active voice, no filler, no repeating an idea already explained. Keep technical terms accurate.",
+    "Create 5 to 8 scenes. Each scene covers one complete idea in 1 to 3 full sentences; never split one idea or sentence across scenes. Give each a short title, claim_ids, and an animated graphic described by layout, elements, points, stat_value, stat_label, and code.",
+    "Choose each layout from what the scene explains: flow = data or requests moving through 2 to 4 parts in order (user, API, database); fanout = one part distributing work to several others, such as a load balancer to servers or a queue to workers (first element is the distributor, optionally preceded by the sender; list a receiver once to have it drawn three times); compare = two options or before and after, with up to 4 points where the first half describe the first; steps = an ordered process or timeline in 2 to 4 short points; code = a short real snippet or config the narration describes (at most 8 lines of 36 characters, only syntax the narration explains); stat = one striking number that appears in the narration (\"99.99%\", \"3x\"); list = 2 to 4 unordered facts; focus = one concept with up to 3 related elements, for ideas without a clear structure. Do not use the same layout in consecutive scenes unless it continues the same diagram.",
     "elements are the concrete tools, services, or concepts the narration talks about. name is the real product name when one is meant (for example \"Redis\", \"PostgreSQL\", \"Docker\", \"Amazon S3\") with is_product true; otherwise a short generic label (for example \"Users\", \"Load balancer\") with is_product false. kind is the closest generic category, one of: " + ELEMENT_KINDS.join(", ") + ". Use at most 4 elements and 4 points per scene.",
-    "points are 2 to 6 word phrases. Use empty strings for stat_value and stat_label unless layout is stat. Graphics must not add facts beyond the narration.",
+    "For fanout, variant says how a receiver is chosen when the narration explains it: rotate (in turn), least (fewest active connections or least busy), hash (same client always to the same receiver), or weighted (some receivers get more). Otherwise use an empty string.",
+    "The last scene is the takeaway: summarise the key idea in one or two sentences, with a focus, list, or stat layout.",
+    "points are 2 to 6 word phrases. Use empty strings for stat_value, stat_label, code, and variant when the layout does not use them. Graphics must not add facts beyond the narration.",
     "Every material factual statement must be covered by one or more claim_ids.",
     "Do not add facts, statistics, dates, or causal claims absent from the research. Avoid quoting source wording.",
     "Keep hook plus all scene narration between 80 and 170 words.",
     "Supported research claims:",
-    JSON.stringify(facts)
+    JSON.stringify(facts),
+    ...(feedback.length ? ["A previous draft failed these checks; fix them:", ...feedback] : [])
   ].join("\n");
   const response = await post({
     model,
@@ -99,8 +104,9 @@ export async function createNarrationAudio(narration, language) {
       type: "user_input",
       content: [{
         type: "text",
-        text: "Read the following narration in " + language + " with clear, natural pacing: " + narration,
-        annotations: [{ type: "speech_metadata", style: "clear, warm, conversational, steady pace" }]
+        // Only the narration is spoken text; any instruction placed here is read aloud by the voice.
+        text: narration,
+        annotations: [{ type: "speech_metadata", style: "clear, warm, conversational teacher, steady pace, in " + language }]
       }]
     }],
     response_format: { type: "audio", mime_type: "audio/wav" },

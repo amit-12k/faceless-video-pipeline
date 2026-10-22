@@ -37,8 +37,6 @@ export const ELEMENT_KINDS = [
   "identity", "monitoring", "message", "scale"
 ];
 
-export const SCENE_LAYOUTS = ["flow", "compare", "stat", "list", "focus"];
-
 export const scriptSchema = {
   type: "object",
   properties: {
@@ -52,7 +50,7 @@ export const scriptSchema = {
           title: { type: "string" },
           narration: { type: "string" },
           claim_ids: { type: "array", items: { type: "string" } },
-          layout: { type: "string", enum: SCENE_LAYOUTS },
+          layout: { type: "string" },
           elements: {
             type: "array",
             items: {
@@ -67,9 +65,11 @@ export const scriptSchema = {
           },
           points: { type: "array", items: { type: "string" } },
           stat_value: { type: "string" },
-          stat_label: { type: "string" }
+          stat_label: { type: "string" },
+          code: { type: "string" },
+          variant: { type: "string" }
         },
-        required: ["title", "narration", "claim_ids", "layout", "elements", "points", "stat_value", "stat_label"]
+        required: ["title", "narration", "claim_ids", "layout", "elements", "points", "stat_value", "stat_label", "code", "variant"]
       }
     }
   },

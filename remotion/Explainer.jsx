@@ -5,16 +5,17 @@ import { Character } from "./Character.jsx";
 import { SceneView } from "./Scene.jsx";
 import { COLORS } from "./theme.js";
 
-export const Explainer = ({ scenes, words, mouth, audio }) => (
+export const Explainer = ({ scenes, cues, phrases, mouth, speech, audio }) => (
   <AbsoluteFill style={{ backgroundColor: COLORS.background }}>
     <Background />
     {scenes.map((scene, i) => (
-      <Sequence key={i} from={scene.start} durationInFrames={scene.end - scene.start}>
+      // Each scene runs 8 frames past its cut and fades out while the next fades in (a crossfade, no blank gap).
+      <Sequence key={i} from={scene.start} durationInFrames={Math.max(1, scene.end - scene.start + (i < scenes.length - 1 ? 8 : 0))}>
         <SceneView scene={scene} index={i} />
       </Sequence>
     ))}
-    <Captions words={words} />
-    <Character mouth={mouth} cues={scenes.map((scene) => scene.start)} />
+    <Character cues={cues} mouth={mouth} scenes={scenes} speech={speech} />
+    <Captions phrases={phrases} scenes={scenes} />
     {audio ? <Html5Audio src={staticFile(audio)} /> : null}
   </AbsoluteFill>
 );

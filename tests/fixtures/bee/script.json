@@ -1,0 +1,54 @@
+{
+  "title": "The Honey Bee Waggle Dance",
+  "hook": "How do forager honey bees share directions inside a dark hive?",
+  "scenes": [
+    {
+      "title": "The Figure-Eight",
+      "visual_text": "Figure-Eight Movement",
+      "narration": "Forager honey bees perform a specialized figure-eight movement on the honeycomb to share where resources like pollen and nectar are located.",
+      "claim_ids": [
+        "claim_1"
+      ]
+    },
+    {
+      "title": "Communicating Distance",
+      "visual_text": "The Straight Waggle Run",
+      "narration": "The distance to a food source is communicated through the length and duration of the straight waggle run.",
+      "claim_ids": [
+        "claim_2"
+      ]
+    },
+    {
+      "title": "Indicating Direction",
+      "visual_text": "Angle Relative to the Sun",
+      "narration": "The direction of the food source is shown by the angle of the waggle run relative to the vertical axis of the honeycomb or the sun.",
+      "claim_ids": [
+        "claim_3"
+      ]
+    },
+    {
+      "title": "Sharing Samples",
+      "visual_text": "Scent and Nectar",
+      "narration": "Watching bees receive nectar samples and the scent of the flower patch to help them find it.",
+      "claim_ids": [
+        "claim_4"
+      ]
+    },
+    {
+      "title": "Acoustic Signals",
+      "visual_text": "Wing Vibrations",
+      "narration": "Inside the dark hive, bees use acoustics and wing vibrations to help signal quality, direction, and distance during the dance.",
+      "claim_ids": [
+        "claim_6"
+      ]
+    },
+    {
+      "title": "Scientific Discovery",
+      "visual_text": "1973 Nobel Prize",
+      "narration": "Austrian scientist Karl von Frisch earned a Nobel Prize in 1973 for discovering how this complex communication system works.",
+      "claim_ids": [
+        "claim_5"
+      ]
+    }
+  ]
+}

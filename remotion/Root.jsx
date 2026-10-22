@@ -1,7 +1,7 @@
 import { Composition } from "remotion";
 import { Explainer } from "./Explainer.jsx";
 
-const defaultProps = { scenes: [], words: [], mouth: [], audio: null, durationInFrames: 300 };
+const defaultProps = { scenes: [], cues: [], phrases: [], mouth: [], speech: { sentences: [], words: [] }, audio: null, durationInFrames: 300 };
 
 export const Root = () => (
   <Composition

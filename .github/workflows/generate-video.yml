@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       topic:
-        description: Topic to explain in the video
-        required: true
+        description: Topic to explain in the video (may be left blank when resuming)
+        required: false
         type: string
       style:
         description: Editorial style
@@ -17,9 +17,19 @@ on:
         required: true
         default: English
         type: string
+      presenter:
+        description: Show the animated robot presenter
+        required: false
+        default: true
+        type: boolean
+      resume_from_run:
+        description: Optional run ID to reuse that run's research, script, and narration and only re-render
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: video-${{ github.run_id }}
@@ -37,6 +47,8 @@ jobs:
       VIDEO_STYLE: ${{ inputs.style }}
       VIDEO_LANGUAGE: ${{ inputs.language }}
       OUTPUT_DIR: artifacts/${{ github.run_id }}
+      RESUME: ${{ inputs.resume_from_run != '' }}
+      VIDEO_MASCOT: ${{ inputs.presenter && 'on' || 'off' }}
       GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
       GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
     steps:
@@ -59,8 +71,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache whisper.cpp and its speech models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/faceless-whisper
+          key: whisper-cpp-1.5.5-base-${{ runner.os }}
+
+      - name: Download the earlier run's files to resume from
+        if: ${{ inputs.resume_from_run != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: faceless-video-${{ inputs.resume_from_run }}
+          path: ${{ env.OUTPUT_DIR }}
+          run-id: ${{ inputs.resume_from_run }}
+          github-token: ${{ github.token }}
+
       - name: Check workflow code
-        run: npm run check
+        run: npm run check && npm test
 
       - name: Generate and validate video
         run: node src/index.mjs

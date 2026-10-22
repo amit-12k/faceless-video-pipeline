@@ -1,0 +1,147 @@
+{
+  "title": "How NGINX Load Balances Traffic",
+  "hook": "See how NGINX distributes traffic across application servers.",
+  "scenes": [
+    {
+      "title": "Sitting Between",
+      "narration": "NGINX sits between users and application servers, receiving incoming requests and distributing them across backend instances. Users never interact directly with the backend servers when NGINX is used as a load balancer.",
+      "claim_ids": [
+        "claim_1",
+        "claim_2"
+      ],
+      "layout": "flow",
+      "elements": [
+        {
+          "name": "Users",
+          "kind": "users",
+          "is_product": false
+        },
+        {
+          "name": "NGINX",
+          "kind": "load-balancer",
+          "is_product": true
+        },
+        {
+          "name": "Servers",
+          "kind": "server",
+          "is_product": false
+        }
+      ],
+      "points": [],
+      "stat_value": "",
+      "stat_label": ""
+    },
+    {
+      "title": "Round Robin",
+      "narration": "By default, NGINX uses the Round Robin algorithm to spread traffic evenly between servers.",
+      "claim_ids": [
+        "claim_3"
+      ],
+      "layout": "stat",
+      "elements": [
+        {
+          "name": "NGINX",
+          "kind": "load-balancer",
+          "is_product": true
+        }
+      ],
+      "points": [],
+      "stat_value": "1",
+      "stat_label": "Even traffic spread"
+    },
+    {
+      "title": "Least Connections",
+      "narration": "The Least Connections load balancing method routes each request to the upstream server with the fewest active connections.",
+      "claim_ids": [
+        "claim_4"
+      ],
+      "layout": "focus",
+      "elements": [
+        {
+          "name": "NGINX",
+          "kind": "load-balancer",
+          "is_product": true
+        },
+        {
+          "name": "Server",
+          "kind": "server",
+          "is_product": false
+        }
+      ],
+      "points": [
+        "Fewest active connections",
+        "Routes each request"
+      ],
+      "stat_value": "",
+      "stat_label": ""
+    },
+    {
+      "title": "Upstream Directive",
+      "narration": "The upstream directive in NGINX configuration is used to define a group of servers for load balancing.",
+      "claim_ids": [
+        "claim_5"
+      ],
+      "layout": "list",
+      "elements": [
+        {
+          "name": "NGINX",
+          "kind": "load-balancer",
+          "is_product": true
+        }
+      ],
+      "points": [
+        "Upstream directive",
+        "Define server group"
+      ],
+      "stat_value": "",
+      "stat_label": ""
+    },
+    {
+      "title": "Weight Parameter",
+      "narration": "Load-balancing methods can be tuned using an optional weight parameter on the server directive to account for different processing capacities.",
+      "claim_ids": [
+        "claim_6"
+      ],
+      "layout": "focus",
+      "elements": [
+        {
+          "name": "NGINX",
+          "kind": "load-balancer",
+          "is_product": true
+        }
+      ],
+      "points": [
+        "Optional weight parameter",
+        "Different processing capacities"
+      ],
+      "stat_value": "",
+      "stat_label": ""
+    },
+    {
+      "title": "IP-Hash",
+      "narration": "IP-hash load balancing uses a hash function to determine which server should be selected based on the client's IP address.",
+      "claim_ids": [
+        "claim_7"
+      ],
+      "layout": "flow",
+      "elements": [
+        {
+          "name": "Users",
+          "kind": "users",
+          "is_product": false
+        },
+        {
+          "name": "NGINX",
+          "kind": "load-balancer",
+          "is_product": true
+        }
+      ],
+      "points": [
+        "Hash function used",
+        "Client IP address"
+      ],
+      "stat_value": "",
+      "stat_label": ""
+    }
+  ]
+}
