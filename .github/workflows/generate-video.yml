@@ -32,11 +32,12 @@ jobs:
     timeout-minutes: 30
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       VIDEO_TOPIC: ${{ inputs.topic }}
       VIDEO_STYLE: ${{ inputs.style }}
       VIDEO_LANGUAGE: ${{ inputs.language }}
       OUTPUT_DIR: artifacts/${{ github.run_id }}
-      GEMINI_TEXT_MODEL: gemini-2.5-flash
+      GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
       GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
     steps:
       - name: Check out source

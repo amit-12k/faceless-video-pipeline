@@ -7,19 +7,19 @@ const normalize = (value) => {
   } catch { return ""; }
 };
 
-export function validateProject(research, script, grounded) {
+export function validateProject(research, script, searched) {
   const errors = [];
   const flags = [];
-  const groundedSet = new Set(grounded.map((item) => normalize(item.url)).filter(Boolean));
+  const searchedSet = new Set(searched.map((item) => normalize(item.url)).filter(Boolean));
   const claims = Array.isArray(research.claims) ? research.claims : [];
   const scenes = Array.isArray(script.scenes) ? script.scenes : [];
-  if (!groundedSet.size) errors.push("Google Search grounding returned no source URLs.");
+  if (!searchedSet.size) errors.push("Web search returned no source URLs.");
   if (claims.length < 5 || claims.length > 12) errors.push("Research must contain 5 to 12 claims.");
 
   for (const claim of claims) {
     const links = (claim.sources || []).map((source) => normalize(source.url)).filter(Boolean);
-    if (claim.support === "supported" && !links.some((link) => groundedSet.has(link))) {
-      errors.push("Supported claim " + claim.id + " has no URL present in grounding citations.");
+    if (claim.support === "supported" && !links.some((link) => searchedSet.has(link))) {
+      errors.push("Supported claim " + claim.id + " has no URL present in the web search results.");
     }
     if (claim.support !== "supported") flags.push({ claim_id: claim.id, support: claim.support, claim: claim.claim });
   }
@@ -44,9 +44,9 @@ export function validateProject(research, script, grounded) {
   if (words < 80 || words > 170) errors.push("Narration has " + words + " words; allowed range is 80 to 170.");
   if (used.size < 3) errors.push("Script must use at least three supported claims.");
 
-  const sources = [...groundedSet].map((url) => ({
+  const sources = [...searchedSet].map((url) => ({
     url,
-    title: grounded.find((item) => normalize(item.url) === url)?.title || ""
+    title: searched.find((item) => normalize(item.url) === url)?.title || ""
   }));
   return {
     passed: errors.length === 0, errors, flags, word_count: words,

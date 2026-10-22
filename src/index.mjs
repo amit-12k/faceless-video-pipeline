@@ -18,16 +18,16 @@ async function main() {
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   try {
-    log("research", "Searching for source-backed claims.");
+    log("research", "Searching the web for source-backed claims.");
     const research = await researchTopic(topic, style, language);
     await saveJson(path.join(outputDir, "research.json"), {
       topic, summary: research.data.summary, claims: research.data.claims,
-      grounded_sources: research.groundedSources, model: research.model
+      search_sources: research.searchSources, model: research.model
     });
 
     log("script", "Writing a scene script from supported claims.");
     const scriptResult = await writeScript(topic, style, language, research.data);
-    const validation = validateProject(research.data, scriptResult.data, research.groundedSources);
+    const validation = validateProject(research.data, scriptResult.data, research.searchSources);
     await saveJson(path.join(outputDir, "script.json"), scriptResult.data);
     await saveJson(path.join(outputDir, "validation-report.json"), {
       ...validation, research_model: research.model, script_model: scriptResult.model,
