@@ -72,17 +72,27 @@ Create a new scenario named **Daily faceless video**.
 
 Each Supabase or GitHub request below is an **HTTP → Make a request** module, set up like this:
 
-- **Authentication type:** API key, with **Credentials** set to the credential named below. Make stores the key in a keychain, so it never appears in a mapped field or in the logged request.
-- **Body content type:** application/JSON.
-- **Body input method:** Data structure. Make then escapes quotes and other special characters in topic text. A hand-written JSON string can break on a topic that contains quotes.
-- **Parse response:** Yes.
+- **Authentication type:** API key, with **Connection** set to the connection named below. Make stores the key in a keychain, so it never appears in a mapped field or in the logged request.
+- **Body content type:** application/JSON. Module 1 is a GET with no body, so leave its **Body content type** empty; otherwise Make reports "Body structure: Value must not be empty".
+- **Body input method:** Data structure. Make then escapes quotes and other special characters in topic text. A hand-written JSON string can break on a topic that contains quotes. Click **Create a data structure** and use **+ Add item** to define each body item's **name and type only**. Leave **Default value** empty: Make doesn't evaluate mappings there. Enter the values in the module's own fields once the structure is saved.
+- **Parse response:** Yes. **Return error if HTTP request fails** is under **Show advanced settings**.
 
-Create the two credentials the first time you need them, from the module's **Credentials → Add** button:
+Create the two connections the first time you need them, from the module's **Connection → Add** button. Later modules pick them from the list.
 
-| Credential name | Key | API key placement | API key parameter name |
-|---|---|---|---|
-| `Supabase make_scheduler` | the `make_scheduler` `sb_secret_...` key | In the header | `apikey` |
-| `GitHub dispatch (faceless-video-pipeline)` | `Bearer github_pat_...` (include the word `Bearer` and one space) | In the header | `Authorization` |
+| Connection name | API Key | API key placement | API key parameter name | Allowed service origins |
+|---|---|---|---|---|
+| `Supabase make_scheduler` | the `make_scheduler` `sb_secret_...` key | In the header | `apikey` | `https://<project-ref>.supabase.co` |
+| `GitHub dispatch` | `Bearer github_pat_...` (include the word `Bearer` and one space) | In the header | `Authorization` | `https://api.github.com` |
+
+Keep **Restrict requests to service URLs** set to Yes, and enter each origin with no path or trailing slash. Make then sends each key only to that address.
+
+Things that tripped up the first build:
+
+- **Module numbers.** Make numbers modules in the order they were created, so a deleted module leaves a gap. For example, the Iterator can be module 3 and the GitHub request module 7. The `{{2.id}}`-style references below follow the chain's order. Pick each value in the mapping panel by its module's role (Iterator, claim, create job, GitHub), not by its number.
+- **Filters on IDs.** In a value like `eq.{{2.id}}`, put the id pill directly after `eq.`, with no `+` or space. Otherwise Supabase rejects the request with "invalid input syntax for type uuid".
+- **Formulas.** Make keeps quote marks as part of the text inside a formula, so don't wrap text in quotes inside `{{…}}`.
+- **Boolean fields.** A Boolean item shows Yes / No buttons. To use a mapped value, switch on the field's **Map** toggle first.
+- **The schedule.** It lives in the scenario's top bar, next to the **Active/Inactive** switch, and starts as "Every 15 minutes". Keep the scenario Inactive until the schedule is set to daily.
 
 Below, `SUPABASE` stands for your project URL, for example `https://abcd1234.supabase.co`.
 
@@ -90,7 +100,7 @@ Below, `SUPABASE` stands for your project URL, for example `https://abcd1234.sup
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** GET
-- **Credentials:** Supabase make_scheduler
+- **Connection:** Supabase make_scheduler
 - **Query parameters:**
 
   | Name | Value |
@@ -119,7 +129,7 @@ With an empty queue the iterator emits nothing and the scenario ends, so no GitH
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** PATCH
-- **Credentials:** Supabase make_scheduler
+- **Connection:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{2.id}}` and `status` = `eq.queued`
 - **Headers:** `Prefer: return=representation`
 - **Body (data structure):**
@@ -138,7 +148,7 @@ The `status=eq.queued` filter makes this an atomic claim. The response is `[ { �
 
 - **URL:** `SUPABASE/rest/v1/video_jobs`
 - **Method:** POST
-- **Credentials:** Supabase make_scheduler
+- **Connection:** Supabase make_scheduler
 - **Headers:**
   - `Prefer: return=representation`
   - `Accept: application/vnd.pgrst.object+json`. This returns the new row as a single object instead of an array.
@@ -164,7 +174,7 @@ Do not set `metadata` here: the workflow owns that column and replaces it.
 
 - **URL:** `https://api.github.com/repos/amit-12k/faceless-video-pipeline/actions/workflows/generate-video.yml/dispatches`
 - **Method:** POST
-- **Credentials:** GitHub dispatch (faceless-video-pipeline)
+- **Connection:** GitHub dispatch
 - **Headers:**
   - `Accept: application/vnd.github+json`
   - `X-GitHub-Api-Version: 2026-03-10`
@@ -176,7 +186,7 @@ Do not set `metadata` here: the workflow owns that column and replaces it.
   | `inputs` (collection) → `topic` | `{{2.topic}}` |
   | `inputs` → `style` | `{{2.style}}` |
   | `inputs` → `language` | `{{2.language}}` |
-  | `inputs` → `presenter` | `{{if(2.presenter; "true"; "false")}}` (text) |
+  | `inputs` → `presenter` | `{{2.presenter}}` (a Text item; Make turns the Boolean into `true` or `false`. Don't use an `if()` formula with quotes: Make keeps the quote marks in the text.) |
   | `inputs` → `job_id` | `{{4.data.id}}` |
   | `inputs` → `topic_id` | `{{2.id}}` |
 
@@ -202,7 +212,7 @@ The responses you can get:
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** PATCH
-- **Credentials:** Supabase make_scheduler
+- **Connection:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{2.id}}` and `status` = `in.(dispatching,dispatched)`
 - **Headers:** `Prefer: return=minimal`
 - **Body (data structure):**
@@ -210,7 +220,7 @@ The responses you can get:
   | Key | Value |
   |---|---|
   | `status` | `dispatched` |
-  | `dispatched_at` | `{{formatDate(now; "YYYY-MM-DDTHH:mm:ssZ")}}` |
+  | `dispatched_at` | `{{now}}` |
   | `github_run_id` | `{{5.data.workflow_run_id}}` (empty with a `204` response) |
 
 The filter accepts `dispatched` as well, in case the workflow's start step marked the topic first. It never touches a topic that someone has since paused. The response is `204` with no body.
@@ -221,7 +231,7 @@ The filter accepts `dispatched` as well, in case the workflow's start step marke
 
 - **URL:** `SUPABASE/rest/v1/video_jobs`
 - **Method:** PATCH
-- **Credentials:** Supabase make_scheduler
+- **Connection:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{4.data.id}}` and `status` = `eq.queued`
 - **Headers:** `Prefer: return=minimal`
 - **Body (data structure):**
@@ -230,13 +240,13 @@ The filter accepts `dispatched` as well, in case the workflow's start step marke
   |---|---|
   | `status` | `dispatch_failed` |
   | `error_message` | `GitHub dispatch returned HTTP {{5.statusCode}}: {{5.data.message}}` |
-  | `finished_at` | `{{formatDate(now; "YYYY-MM-DDTHH:mm:ssZ")}}` |
+  | `finished_at` | `{{now}}` |
 
 **Module 9: Return the topic to the queue (HTTP)**
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** PATCH
-- **Credentials:** Supabase make_scheduler
+- **Connection:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{2.id}}` and `status` = `eq.dispatching`
 - **Headers:** `Prefer: return=minimal`
 - **Body (data structure):**
@@ -250,13 +260,13 @@ The next daily run picks the topic up again. A dispatch that keeps failing, for 
 
 ### Scenario settings and schedule
 
-Open the scenario settings (gear icon) and set:
+Open the scenario settings (gear icon in the bottom toolbar) and set:
 
 - **Sequential processing** (called *Process data in order* in newer versions): **On**. Only one execution runs at a time, so two runs can never claim topics at once.
 - **Allow storing of incomplete executions:** **Off**. A stored execution resumed later could repeat a dispatch.
 - **Data is confidential:** **On** (optional). Make then keeps no request or response data, such as topic text, in the execution history. Credentials are never shown either way.
 
-**Schedule:** open the clock icon on module 1 and choose **Run scenario: Every day**, then set the **Time**. Make uses the scenario's time zone, set in your profile or organization settings. Turn the scenario **On**.
+**Schedule:** click the schedule button in the scenario's top bar (it starts as "Every 15 minutes"), choose **Every day**, and set the time. Make uses the time zone in your profile or organization settings. Then switch the scenario from **Inactive** to **Active**.
 
 ### Operation cost
 
