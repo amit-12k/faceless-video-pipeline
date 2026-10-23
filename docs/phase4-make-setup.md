@@ -34,8 +34,8 @@ Under **Project Settings → API Keys**, use **Secret keys → New secret key** 
 
 | Key name | Used by | Where it is stored |
 |---|---|---|
-| `github-actions` | the workflow's tracking steps | GitHub secret `SUPABASE_SECRET_KEY` |
-| `make-scheduler` | the Make.com scenario | a Make.com API key credential |
+| `github_actions` | the workflow's tracking steps | GitHub secret `SUPABASE_SECRET_KEY` |
+| `make_scheduler` | the Make.com scenario | a Make.com API key credential |
 
 Separate keys can be revoked independently, for example if one leaks. Secret keys start with `sb_secret_`.
 
@@ -50,7 +50,7 @@ In GitHub, open **Settings → Secrets and variables → Actions → New reposit
 | Secret | Value |
 |---|---|
 | `SUPABASE_URL` | `https://<project-ref>.supabase.co` (no trailing path) |
-| `SUPABASE_SECRET_KEY` | the `github-actions` secret key |
+| `SUPABASE_SECRET_KEY` | the `github_actions` secret key |
 
 Only the two tracking steps receive these secrets. Without them the workflow still generates videos exactly as before, and the log says that tracking is off.
 
@@ -81,7 +81,7 @@ Create the two credentials the first time you need them, from the module's **Cre
 
 | Credential name | Key | API key placement | API key parameter name |
 |---|---|---|---|
-| `Supabase make-scheduler` | the `make-scheduler` `sb_secret_...` key | In the header | `apikey` |
+| `Supabase make_scheduler` | the `make_scheduler` `sb_secret_...` key | In the header | `apikey` |
 | `GitHub dispatch (faceless-video-pipeline)` | `Bearer github_pat_...` (include the word `Bearer` and one space) | In the header | `Authorization` |
 
 Below, `SUPABASE` stands for your project URL, for example `https://abcd1234.supabase.co`.
@@ -90,7 +90,7 @@ Below, `SUPABASE` stands for your project URL, for example `https://abcd1234.sup
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** GET
-- **Credentials:** Supabase make-scheduler
+- **Credentials:** Supabase make_scheduler
 - **Query parameters:**
 
   | Name | Value |
@@ -119,7 +119,7 @@ With an empty queue the iterator emits nothing and the scenario ends, so no GitH
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** PATCH
-- **Credentials:** Supabase make-scheduler
+- **Credentials:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{2.id}}` and `status` = `eq.queued`
 - **Headers:** `Prefer: return=representation`
 - **Body (data structure):**
@@ -138,7 +138,7 @@ The `status=eq.queued` filter makes this an atomic claim. The response is `[ { �
 
 - **URL:** `SUPABASE/rest/v1/video_jobs`
 - **Method:** POST
-- **Credentials:** Supabase make-scheduler
+- **Credentials:** Supabase make_scheduler
 - **Headers:**
   - `Prefer: return=representation`
   - `Accept: application/vnd.pgrst.object+json`. This returns the new row as a single object instead of an array.
@@ -202,7 +202,7 @@ The responses you can get:
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** PATCH
-- **Credentials:** Supabase make-scheduler
+- **Credentials:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{2.id}}` and `status` = `in.(dispatching,dispatched)`
 - **Headers:** `Prefer: return=minimal`
 - **Body (data structure):**
@@ -221,7 +221,7 @@ The filter accepts `dispatched` as well, in case the workflow's start step marke
 
 - **URL:** `SUPABASE/rest/v1/video_jobs`
 - **Method:** PATCH
-- **Credentials:** Supabase make-scheduler
+- **Credentials:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{4.data.id}}` and `status` = `eq.queued`
 - **Headers:** `Prefer: return=minimal`
 - **Body (data structure):**
@@ -236,7 +236,7 @@ The filter accepts `dispatched` as well, in case the workflow's start step marke
 
 - **URL:** `SUPABASE/rest/v1/content_topics`
 - **Method:** PATCH
-- **Credentials:** Supabase make-scheduler
+- **Credentials:** Supabase make_scheduler
 - **Query parameters:** `id` = `eq.{{2.id}}` and `status` = `eq.dispatching`
 - **Headers:** `Prefer: return=minimal`
 - **Body (data structure):**
