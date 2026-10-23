@@ -26,6 +26,14 @@ on:
         description: Optional run ID to reuse that run's research, script, and narration and only re-render
         required: false
         type: string
+      job_id:
+        description: Optional video_jobs UUID from the scheduler (leave blank for manual runs; one is created)
+        required: false
+        type: string
+      topic_id:
+        description: Optional content_topics UUID this run belongs to
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -51,6 +59,7 @@ jobs:
       VIDEO_MASCOT: ${{ inputs.presenter && 'on' || 'off' }}
       GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
       GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
+      VIDEO_TOPIC_ID: ${{ inputs.topic_id }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -60,6 +69,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # Supabase credentials are given only to the two tracking steps. Without them the video is still
+      # generated; tracking problems are warnings and never change the run's result.
+      - name: Assign job ID and record the start
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REQUESTED_JOB_ID: ${{ inputs.job_id }}
+          RESUME_FROM_RUN: ${{ inputs.resume_from_run }}
+        run: node src/track-job.mjs start
 
       - name: Install FFmpeg, fonts, and headless Chrome libraries
         run: |
@@ -90,9 +110,11 @@ jobs:
         run: npm run check && npm test
 
       - name: Generate and validate video
+        id: generate
         run: node src/index.mjs
 
       - name: Upload job files and diagnostics
+        id: upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -101,3 +123,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           overwrite: true
+
+      - name: Record the job result
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESUME_FROM_RUN: ${{ inputs.resume_from_run }}
+          GENERATE_OUTCOME: ${{ steps.generate.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          ARTIFACT_NAME: faceless-video-${{ github.run_id }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: node src/track-job.mjs finish

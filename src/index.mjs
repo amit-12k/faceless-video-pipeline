@@ -10,8 +10,12 @@ import { splitWords } from "./timing.mjs";
 import { transcribeWords } from "./transcribe.mjs";
 import { validateProject } from "./validate.mjs";
 
-const jobId = process.env.GITHUB_RUN_ID || String(Date.now());
-const outputDir = path.resolve(process.env.OUTPUT_DIR || path.join("artifacts", jobId));
+const runId = process.env.GITHUB_RUN_ID || String(Date.now());
+// Reports carry the tracked job's UUID (VIDEO_JOB_ID) when there is one; files and artifacts stay named
+// after the Actions run so resuming and retries work as before.
+const jobId = process.env.VIDEO_JOB_ID || runId;
+const githubRunId = process.env.GITHUB_RUN_ID || null;
+const outputDir = path.resolve(process.env.OUTPUT_DIR || path.join("artifacts", runId));
 // Resume mode reuses research, script, and narration already in OUTPUT_DIR (for example a downloaded
 // artifact from an earlier run) so only the stages that need fixing call paid APIs again.
 const resume = process.env.RESUME === "true";
@@ -76,7 +80,7 @@ async function main() {
     const narration = [script.hook, ...script.scenes.map((scene) => scene.narration)].join("\n\n");
     await writeFile(path.join(outputDir, "narration.txt"), narration + "\n", "utf8");
     await saveJson(path.join(outputDir, "metadata.json"), {
-      job_id: jobId, topic, style, language, title: script.title, script_model: scriptModel,
+      job_id: jobId, github_run_id: githubRunId, topic, style, language, title: script.title, script_model: scriptModel,
       created_at: previous?.created_at || new Date().toISOString(), publication_status: "not_published", output: "video.mp4"
     });
 
@@ -180,7 +184,7 @@ async function main() {
     log("complete", "Video passed caption, scene, audio, and video quality checks.");
   } catch (error) {
     const report = {
-      job_id: jobId, stage_error: error.message || String(error), occurred_at: new Date().toISOString(),
+      job_id: jobId, github_run_id: githubRunId, stage_error: error.message || String(error), occurred_at: new Date().toISOString(),
       note: "See the GitHub Actions log for stage output. API keys are not written to diagnostics."
     };
     await saveJson(path.join(outputDir, "error-report.json"), report).catch(() => {});
