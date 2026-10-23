@@ -36,7 +36,7 @@ Structural and source-link checks do not prove factual accuracy. Read the cited 
 - Remotion is free for individuals and companies with up to three employees; larger companies need a [Remotion company license](https://www.remotion.dev/license). Product logos come from [Simple Icons](https://simpleicons.org) (CC0 icons; the brands remain their owners' trademarks) and generic icons from [Lucide](https://lucide.dev).
 - Tavily's free plan includes 1,000 API credits per month; each video runs one basic search (1 credit). Topics are sent to Tavily as search queries. Check current [Tavily pricing](https://docs.tavily.com/faq/faq).
 - Google says content submitted through the unpaid Gemini API tier may be used to improve its products. Do not submit confidential or personal data. See [Gemini API terms](https://ai.google.dev/gemini-api/terms).
-- This MVP uses no paid video-generation API, database, storage service, or publishing integration.
+- The pipeline uses no paid video-generation API, storage service, or publishing integration. Phase 4 job tracking is optional and fits the free tiers of Supabase and Make.com (see below).
 
 ## Troubleshooting
 
@@ -55,8 +55,82 @@ Manual inputs are topic, editorial style, and narration language. Model IDs are 
 
 To re-render an earlier run without calling Gemini or Tavily again, run the workflow with **resume_from_run** set to that run's ID (the number in its URL). Its research, script, and narration are reused when they are still valid; only missing or invalid stages are regenerated.
 
-Run `npm test` for the regression tests (no API keys or network needed); they use recorded scripts and narration loudness from earlier runs in `tests/fixtures`.
+Run `npm test` for the regression tests (no API keys or network needed); they use recorded scripts and narration loudness from earlier runs in `tests/fixtures`, and mock every Supabase request in `tests/job-tracker.test.mjs`.
+
+## Phase 4: scheduled runs and job tracking
+
+Phase 4 is optional. A daily [Make.com](https://www.make.com) scenario takes the next topic from a Supabase queue and starts this workflow, and the workflow records each run in Supabase. Videos are still never published. Setup is done entirely in the browser; see **[docs/phase4-make-setup.md](docs/phase4-make-setup.md)** for every module, endpoint, header, body and filter.
+
+```
+Make.com (daily) ──▶ Supabase content_topics: claim one queued topic (queued → dispatching)
+                 ──▶ Supabase video_jobs: new job (queued), returns its UUID
+                 ──▶ GitHub: dispatch generate-video.yml with topic settings + job_id + topic_id
+GitHub Actions   ──▶ start: job running, topic dispatched … finish: job succeeded/failed, topic completed/failed
+```
+
+- **Tables:** the migration [supabase/migrations/20261023000000_phase4_job_tracking.sql](supabase/migrations/20261023000000_phase4_job_tracking.sql) creates `content_topics` (the queue) and `video_jobs` (one row per run). Apply it once in the Supabase dashboard: **SQL Editor → New query**, paste the file, **Run**. It runs in one transaction, and a repeated run fails without changing anything. Row Level Security is on with no policies, and `anon`/`authenticated` have no access, so only server-side secret keys can use the tables.
+- **Tracking code:** [src/job-tracker.mjs](src/job-tracker.mjs) is a small Supabase REST client with built-in `fetch` and no new dependencies. The workflow runs it through [src/track-job.mjs](src/track-job.mjs).
+  - **Start step** (before generation): it reuses the `job_id` input or creates a UUID for manual runs, exports it as `VIDEO_JOB_ID`, marks the job `running`, and marks the related topic `dispatched`.
+  - **Finish step** (after the artifact upload, runs even when generation fails or the run is cancelled): it derives the status from the actual outcomes of the generate and upload steps, then records the artifact name and link and any error.
+  - **Job and topic are updated separately.** A failed status update is a warning only: it never fails the run, never changes a rendered video's result, never hides the original error, and never triggers a retry or a new dispatch.
+- **Reports:** `metadata.json` and `error-report.json` carry the job UUID as `job_id` (with `github_run_id` beside it). Output folders and artifacts keep their run-ID names, so resuming works as before.
+
+### GitHub secrets
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY`, `TAVILY_API_KEY` | yes | video generation (unchanged) |
+| `SUPABASE_URL` | for tracking | `https://<project-ref>.supabase.co` |
+| `SUPABASE_SECRET_KEY` | for tracking | a Supabase secret key (`sb_secret_…`) created just for GitHub Actions |
+| `SUPABASE_SERVICE_ROLE_KEY` | fallback | legacy `service_role` key, used only when `SUPABASE_SECRET_KEY` is not set |
+
+The Supabase secrets are passed only to the two tracking steps. If they are missing, tracking is off and the log says so. Make.com uses its own Supabase secret key and a fine-grained GitHub token limited to this repository with **Actions: Read and write**. Both are stored as Make API key credentials, never in mapped fields.
+
+### Manual runs still work as before
+
+**Actions → Generate faceless video → Run workflow** still takes topic, style, language, presenter, and resume_from_run. There are two new optional inputs, both normally left blank:
+- **job_id:** the scheduler's `video_jobs` UUID. Leave it blank and a new UUID is created, recorded as a `manual` job when tracking is configured.
+- **topic_id:** link the run to a `content_topics` row.
+
+A value that is not a UUID stops the run before Gemini or Tavily is called. A `topic_id` that does not exist is ignored with a warning.
+
+### Job and topic statuses
+
+| `video_jobs.status` | Meaning |
+|---|---|
+| `queued` | Created by Make.com; not yet started on GitHub |
+| `running` | The workflow's start step ran (also set again when a run is re-run) |
+| `succeeded` | Generation, all quality checks, and the artifact upload succeeded |
+| `failed` | Generation failed, the run was cancelled, an earlier step failed, or the upload failed after a good render (`error_message` says which) |
+| `dispatch_failed` | GitHub rejected the dispatch request; no run was started |
+
+| `content_topics.status` | Meaning |
+|---|---|
+| `queued` | Waiting; the highest `priority`, then the oldest, is taken first |
+| `dispatching` | Claimed by the scheduler, dispatch in progress |
+| `dispatched` | A workflow run was started for it |
+| `completed` | Its run succeeded (`completed_at`, `github_run_id`) |
+| `failed` | Its run failed (`last_error`); set it back to `queued` to retry |
+| `paused` | Skipped by the scheduler and never changed by the workflow |
+
+Statuses only move forward. The workflow never sets `queued`, `dispatching` or `dispatch_failed`, never marks a completed topic failed, and never touches a paused one. Re-running an Actions run reuses its job, which goes back to `running`.
+
+### Failure and retry behaviour
+
+- **Rejected dispatch** (`4xx`/`5xx` from GitHub): the job becomes `dispatch_failed`, and the topic goes back to `queued` with the reason, so the next daily run tries again.
+- **Ambiguous dispatch** (timeout or network error): the scenario stops and the topic stays `dispatching`. GitHub may still have started the run, so nothing is requeued automatically; see *Recovering stuck rows* in the setup guide.
+- **Failed generation:** the job and topic are marked `failed` with the stage error. Fix the cause and set the topic to `queued`, or re-run the Actions run.
+- **Overlapping runs:** sequential processing in Make plus the atomic `queued → dispatching` claim mean a topic is dispatched at most once per claim.
+- **Tracking outages:** the run continues and records nothing for that step; the video and artifact are unaffected.
+
+### Cost and security notes
+
+- **Supabase:** two small tables fit the Free plan. Free projects can be paused after a period of inactivity; check [Supabase pricing](https://supabase.com/pricing).
+- **Make.com:** about 2 operations per run with an empty queue and about 8 when a topic is dispatched, so one video a day is roughly 250 operations a month. Check your [Make plan](https://www.make.com/en/pricing).
+- **GitHub Actions:** minutes are the same as for a manual run of each video.
+- **Artifact links expire.** `artifact_url` points to a GitHub artifact kept for seven days. Supabase keeps the job history, not the video file; download videos you want to keep.
+- **Secrets stay out of logs and the database:** keys are never logged or stored, and error text is cleaned of key-like strings before it is written. Never put a Supabase secret key in browser code or a public app; use one key per service so each can be revoked alone.
 
 ## Official API references
 
-[Tavily Search](https://docs.tavily.com/api-reference/endpoint/search) · [Structured output](https://ai.google.dev/gemini-api/docs/structured-output) · [Speech generation](https://ai.google.dev/gemini-api/docs/speech-generation)
+[Tavily Search](https://docs.tavily.com/api-reference/endpoint/search) · [Structured output](https://ai.google.dev/gemini-api/docs/structured-output) · [Speech generation](https://ai.google.dev/gemini-api/docs/speech-generation) · [Supabase REST API](https://supabase.com/docs/guides/api) · [Supabase API keys](https://supabase.com/docs/guides/api/api-keys) · [GitHub workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)
